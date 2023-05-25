@@ -128,22 +128,25 @@ class VRDataLoader(Dataset):
         depths = []
         states = []
         
-        for i in range(self.lastRun - self.startRun):
-            rgb_dir = os.path.join(self.data_dir, f'{i+self.startRun}', 'rgb')
-            depth_dir = os.path.join(self.data_dir, f'{i+self.startRun}', 'depth')
-            state_dir = os.path.join(self.data_dir, f'{i+self.startRun}', 'states')
+        for k in range(self.lastRun - self.startRun):
+            rgb_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'rgb')
+            depth_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'depth')
+            state_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'states')
             
             state_names = os.listdir(state_dir) #get all files in the directory
-            state_names = [state_name for state_name in state_names if state_name.endswith('.csv')] #only get the csv files
-            num_points = len(state_names)
+            state_names = [int(state_name[6:-4]) for state_name in state_names if state_name.endswith('.csv')] #only get the csv files
+            
+            num_points = sorted(state_names)
+            print(num_points)
             lastState = None
 
             this_run_states = []
-            for i in range(num_points):
+            for i in num_points:
+                
                 rgb_path = os.path.join(rgb_dir, f'rgb{i}.png')
                 depth_path = os.path.join(depth_dir, f'depth{i}.png')
                 state_path = os.path.join(state_dir, f'states{i}.csv')
-
+                
                 with open(state_path, 'r') as f:
                     data = f.readlines()
                     isOpen = int(data[0].split(',')[6])
@@ -155,8 +158,8 @@ class VRDataLoader(Dataset):
                     this_state[0:6] = state[0:6]
                     this_state[6] = state[6]
                     this_run_states.append(this_state)
-
-                if i == 0:
+                
+                if i == num_points[0]:
                     continue
                 
                 # rgb = torchvision.io.read_image(rgb_path)
@@ -170,7 +173,7 @@ class VRDataLoader(Dataset):
 
             #smooth out velocities with a gaussian for this run
             this_run_states = np.array(this_run_states, dtype=np.float32)
-
+            
             size = 15
             sigma = 4
             filter_range = np.linspace(-int(size/2),int(size/2),size)
@@ -179,11 +182,11 @@ class VRDataLoader(Dataset):
             #smooth out positions with a gaussian
             for i in range(6):
                 this_run_states[:, i] = np.convolve(this_run_states[:, i], gaussian_filter, mode='same')
-
             #take numerical derivative of position to get velocity
             this_run_states[:-1, 0:6] = np.diff(this_run_states[:, 0:6], axis=0)
+            
             this_run_states = this_run_states[1:, :]
-
+            
             #smooth out velocities with a gaussian
             # for i in range(6):
             #     this_run_states[:, i] = np.convolve(this_run_states[:, i], gaussian_filter, mode='same')
@@ -193,7 +196,6 @@ class VRDataLoader(Dataset):
 
         #smooth out velocities with a moving average
         states = np.array(states, dtype=np.float32)
-        
         #plot x velocity after smoothing
         states = torch.tensor(states).to('cuda')
         
