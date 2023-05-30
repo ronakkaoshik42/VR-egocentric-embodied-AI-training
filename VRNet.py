@@ -49,7 +49,7 @@ class SpatialSoftmax(torch.nn.Module):
 class VRNet(nn.Module):
     def __init__(self):
         super(VRNet, self).__init__()
-        # Convolution 1 160x120x4 -> 77x57x80
+        # Convolution 1 160x120x4 -> 77x57x240
         self.conv1_rgbTop = nn.Conv2d(3, 64, 7, padding='valid', stride=2)
         self.conv1_depthTop = nn.Conv2d(1, 16, 7, padding='valid', stride=2)
         self.conv1_rgbEff = nn.Conv2d(3, 64, 7, padding='valid', stride=2)
