@@ -49,11 +49,16 @@ class SpatialSoftmax(torch.nn.Module):
 class VRNet(nn.Module):
     def __init__(self):
         super(VRNet, self).__init__()
-        # Convolution 1 160x120x4 -> 77x57x80
-        self.conv1_rgb = nn.Conv2d(3, 64, 7, padding='valid', stride=2)
-        self.conv1_depth = nn.Conv2d(1, 16, 7, padding='valid', stride=2)
-        # Convolution 2 77x57x80 -> 77x57x32
-        self.conv2 = nn.Conv2d(80, 32, 1, padding='same')
+        # Convolution 1 160x120x4 -> 77x57x240
+        self.conv1_rgbTop = nn.Conv2d(3, 64, 7, padding='valid', stride=2)
+        self.conv1_depthTop = nn.Conv2d(1, 16, 7, padding='valid', stride=2)
+        self.conv1_rgbEff = nn.Conv2d(3, 64, 7, padding='valid', stride=2)
+        self.conv1_depthEff = nn.Conv2d(1, 16, 7, padding='valid', stride=2)
+        self.conv1_rgbSide = nn.Conv2d(3, 64, 7, padding='valid', stride=2)
+        self.conv1_depthSide = nn.Conv2d(1, 16, 7, padding='valid', stride=2)
+        
+        # Convolution 2 77x57x240 -> 77x57x32
+        self.conv2 = nn.Conv2d(240, 32, 1, padding='same')
         self.conv2_bn = nn.BatchNorm2d(32, eps=0.001, momentum=0.99)
         # Convolution 3 77x57x43 -> 75x55x32
         self.conv3 = nn.Conv2d(32, 32, 3, padding='valid')
@@ -78,10 +83,14 @@ class VRNet(nn.Module):
 
         #set conv1_rgb weights to be first layer from pretrained model
         googlenet = torchvision.models.googlenet(pretrained=True)
-        self.conv1_rgb.weight.data = googlenet.conv1.conv.weight.data
+        self.conv1_rgbTop.weight.data = googlenet.conv1.conv.weight.data
 
         #weights should be uniformly sampled from [-0.1, 0.1]
-        self.conv1_depth.weight.data.uniform_(-0.1, 0.1)
+        self.conv1_depthTop.weight.data.uniform_(-0.1, 0.1)
+        self.conv1_rgbEff.weight.data.uniform_(-0.1, 0.1)
+        self.conv1_depthEff.weight.data.uniform_(-0.1, 0.1)
+        self.conv1_rgbSide.weight.data.uniform_(-0.1, 0.1)
+        self.conv1_depthSide.weight.data.uniform_(-0.1, 0.1)
         self.conv2.weight.data.uniform_(-0.1, 0.1)
         self.conv3.weight.data.uniform_(-0.1, 0.1)
         self.conv4.weight.data.uniform_(-0.1, 0.1)
@@ -91,11 +100,16 @@ class VRNet(nn.Module):
         self.fc3.weight.data.uniform_(-0.1, 0.1)
         self.fc4.weight.data.uniform_(-0.1, 0.1)
 
-    def forward(self, rgbImg, depthImg):
+    def forward(self, rgbTopImg, depthTopImg, rgbEffImg, depthEffImg, rgbSideImg, depthSideImg):
         #conv layers
-        x_rgb = F.relu(self.conv1_rgb(rgbImg))
-        x_depth = F.relu(self.conv1_depth(depthImg))
-        x = torch.cat((x_rgb, x_depth), 1)
+        x_rgbTop = F.relu(self.conv1_rgbTop(rgbTopImg))
+        x_depthTop = F.relu(self.conv1_depthTop(depthTopImg))
+        x_rgbEff = F.relu(self.conv1_rgbEff(rgbEffImg))
+        x_depthEff = F.relu(self.conv1_depthEff(depthEffImg))
+        x_rgbSide = F.relu(self.conv1_rgbSide(rgbSideImg))
+        x_depthSide = F.relu(self.conv1_depthSide(depthSideImg))
+
+        x = torch.cat((x_rgbTop, x_depthTop, x_rgbEff, x_depthEff, x_rgbSide, x_depthSide), 1)
         
         #implement convulutional layers with batch normalization
         x = F.relu(self.conv2(x))
@@ -118,19 +132,29 @@ class VRDataLoader(Dataset):
         self.startRun = startRun
         self.lastRun = lastRun
         self.batch_size = batch_size
-        self.rgb_images, self.depth_images, self.states = self.load_data()
-        self.arrayIndicies = list([i for i in range(len(self.rgb_images))])
-        print(len(self.rgb_images), len(self.depth_images), len(self.states))
-        assert(len(self.rgb_images) == len(self.depth_images) == len(self.states))
+        self.rgbTop_images, self.depthTop_images, self.rgbEff_images, self.depthEff_images, self.rgbSide_images, self.depthSide_images, self.states = self.load_data()
+        self.arrayIndicies = list([i for i in range(len(self.rgbTop_images))])
+        
+        # print(len(self.rgb_images), len(self.depth_images), len(self.states))
+        # assert(len(self.rgb_images) == len(self.depth_images) == len(self.states))
 
     def load_data(self):
-        rgbs = []
-        depths = []
+        rgbsTop = []
+        depthsTop = []
+        rgbsEff = []
+        depthsEff = []
+        rgbsSide = []
+        depthsSide = []
         states = []
         
         for k in range(self.lastRun - self.startRun):
-            rgb_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'rgb')
-            depth_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'depth')
+            rgbTop_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'rgb_Top')
+            depthTop_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'depth_Top')
+            rgbEff_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'rgb_Eff')
+            depthEff_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'depth_Eff')
+            rgbSide_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'rgb_Side')
+            depthSide_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'depth_Side')
+
             state_dir = os.path.join(self.data_dir, f'{k+self.startRun}', 'states')
             
             state_names = os.listdir(state_dir) #get all files in the directory
@@ -143,8 +167,13 @@ class VRDataLoader(Dataset):
             this_run_states = []
             for i in num_points:
                 
-                rgb_path = os.path.join(rgb_dir, f'rgb{i}.png')
-                depth_path = os.path.join(depth_dir, f'depth{i}.png')
+                rgbTop_path = os.path.join(rgbTop_dir, f'rgb{i}.png')
+                depthTop_path = os.path.join(depthTop_dir, f'depth{i}.png')
+                rgbEff_path = os.path.join(rgbEff_dir, f'rgb{i}.png')
+                depthEff_path = os.path.join(depthEff_dir, f'depth{i}.png')
+                rgbSide_path = os.path.join(rgbSide_dir, f'rgb{i}.png')
+                depthSide_path = os.path.join(depthSide_dir, f'depth{i}.png')                
+                
                 state_path = os.path.join(state_dir, f'states{i}.csv')
                 
                 with open(state_path, 'r') as f:
@@ -162,14 +191,26 @@ class VRDataLoader(Dataset):
                 if i == num_points[0]:
                     continue
                 
-                # rgb = torchvision.io.read_image(rgb_path)
-                rgb = Image.open(rgb_path)
-                # depth = torchvision.io.read_image(depth_path)
-                depth = Image.open(depth_path)
-                rgb = torchvision.transforms.ToTensor()(rgb)
-                depth = torchvision.transforms.ToTensor()(depth) 
-                rgbs.append(rgb)
-                depths.append(depth)
+                rgbTop = Image.open(rgbTop_path)
+                depthTop = Image.open(depthTop_path)
+                rgbTop = torchvision.transforms.ToTensor()(rgbTop)
+                depthTop = torchvision.transforms.ToTensor()(depthTop) 
+                rgbsTop.append(rgbTop)
+                depthsTop.append(depthTop)
+
+                rgbEff = Image.open(rgbEff_path)
+                depthEff = Image.open(depthEff_path)
+                rgbEff = torchvision.transforms.ToTensor()(rgbEff)
+                depthEff = torchvision.transforms.ToTensor()(depthEff) 
+                rgbsEff.append(rgbEff)
+                depthsEff.append(depthEff)
+
+                rgbSide = Image.open(rgbSide_path)
+                depthSide = Image.open(depthSide_path)
+                rgbSide = torchvision.transforms.ToTensor()(rgbSide)
+                depthSide = torchvision.transforms.ToTensor()(depthSide) 
+                rgbsSide.append(rgbSide)
+                depthsSide.append(depthSide)
 
             #smooth out velocities with a gaussian for this run
             this_run_states = np.array(this_run_states, dtype=np.float32)
@@ -200,24 +241,53 @@ class VRDataLoader(Dataset):
         states = torch.tensor(states).to('cuda')
         
         #compute mean and std of images
-        rgbs = torch.stack(rgbs).float() / 255
-        depths = torch.stack(depths).float() / 255
-        rgb_mean = torch.mean(rgbs, dim=(0, 2, 3))
-        depth_mean = torch.mean(depths, dim=(0, 2, 3))
+        rgbsTop = torch.stack(rgbsTop).float() / 255
+        depthsTop = torch.stack(depthsTop).float() / 255
+        rgbTop_mean = torch.mean(rgbsTop, dim=(0, 2, 3))
+        depthTop_mean = torch.mean(depthsTop, dim=(0, 2, 3))
+
+        rgbsEff = torch.stack(rgbsEff).float() / 255
+        depthsEff = torch.stack(depthsEff).float() / 255
+        rgbEff_mean = torch.mean(rgbsEff, dim=(0, 2, 3))
+        depthEff_mean = torch.mean(depthsEff, dim=(0, 2, 3))
+
+        rgbsSide = torch.stack(rgbsSide).float() / 255
+        depthsSide = torch.stack(depthsSide).float() / 255
+        rgbSide_mean = torch.mean(rgbsSide, dim=(0, 2, 3))
+        depthSide_mean = torch.mean(depthsSide, dim=(0, 2, 3))
         
         #compute std
-        rgb_std = torch.std(rgbs, dim=(0, 2, 3))
-        depth_std = torch.std(depths, dim=(0, 2, 3))
-        #normalize images
-        rgbs[:,0,:,:] = (rgbs[:,0,:,:] - rgb_mean[0]) / rgb_std[0]
-        rgbs[:,1,:,:] = (rgbs[:,1,:,:] - rgb_mean[0]) / rgb_std[1]
-        rgbs[:,2,:,:] = (rgbs[:,2,:,:] - rgb_mean[0]) / rgb_std[2]
-        depths = (depths - depth_mean) / depth_std
+        rgbTop_std = torch.std(rgbsTop, dim=(0, 2, 3))
+        depthTop_std = torch.std(depthsTop, dim=(0, 2, 3))
 
-        print('rgb mean: ', rgb_mean)
-        print('rgb std: ', rgb_std)
-        print('depth mean: ', depth_mean)
-        print('depth std: ', depth_std)
+        rgbEff_std = torch.std(rgbsEff, dim=(0, 2, 3))
+        depthEff_std = torch.std(depthsEff, dim=(0, 2, 3))
+
+        rgbSide_std = torch.std(rgbsSide, dim=(0, 2, 3))
+        depthSide_std = torch.std(depthsSide, dim=(0, 2, 3))
+
+        #normalize images
+        rgbsTop[:,0,:,:] = (rgbsTop[:,0,:,:] - rgbTop_mean[0]) / rgbTop_std[0]
+        rgbsTop[:,1,:,:] = (rgbsTop[:,1,:,:] - rgbTop_mean[0]) / rgbTop_std[1]
+        rgbsTop[:,2,:,:] = (rgbsTop[:,2,:,:] - rgbTop_mean[0]) / rgbTop_std[2]
+        depthsTop = (depthsTop - depthTop_mean) / depthTop_std
+
+        rgbsEff[:,0,:,:] = (rgbsEff[:,0,:,:] - rgbEff_mean[0]) / rgbEff_std[0]
+        rgbsEff[:,1,:,:] = (rgbsEff[:,1,:,:] - rgbEff_mean[0]) / rgbEff_std[1]
+        rgbsEff[:,2,:,:] = (rgbsEff[:,2,:,:] - rgbEff_mean[0]) / rgbEff_std[2]
+        depthsEff = (depthsEff - depthEff_mean) / depthEff_std
+
+        rgbsSide[:,0,:,:] = (rgbsSide[:,0,:,:] - rgbSide_mean[0]) / rgbSide_std[0]
+        rgbsSide[:,1,:,:] = (rgbsSide[:,1,:,:] - rgbSide_mean[0]) / rgbSide_std[1]
+        rgbsSide[:,2,:,:] = (rgbsSide[:,2,:,:] - rgbSide_mean[0]) / rgbSide_std[2]
+        depthsSide = (depthsSide - depthSide_mean) / depthSide_std
+
+
+
+        print('rgb mean: ', rgbTop_mean)
+        print('rgb std: ', rgbTop_std)
+        print('depth mean: ', depthTop_mean)
+        print('depth std: ', depthTop_std)
         print('states mean: ', torch.mean(states, dim=0))
         print('states std: ', torch.std(states, dim=0))
 
@@ -225,7 +295,7 @@ class VRDataLoader(Dataset):
         for i in range(6):
             states[:, i] = (states[:, i] - torch.mean(states[:, i])) / torch.std(states[:, i])
 
-        return rgbs, depths, states
+        return rgbsTop, depthsTop, rgbsEff, depthsEff, rgbsSide, depthsSide, states
     
     def __len__(self):
         return len(self.states) // self.batch_size
@@ -238,20 +308,34 @@ class VRDataLoader(Dataset):
         idx = idx * self.batch_size
         desiredIndexes = self.arrayIndicies[idx:idx+self.batch_size]
 
-        rgb_img = []
-        depth_img = []
+        rgbTop_img = []
+        depthTop_img = []
+        rgbEff_img = []
+        depthEff_img = []
+        rgbSide_img = []
+        depthSide_img = []
         state = []
         
         for i in desiredIndexes:
-            rgb_img.append(self.rgb_images[i])
-            depth_img.append(self.depth_images[i])
+            rgbTop_img.append(self.rgbTop_images[i])
+            depthTop_img.append(self.depthTop_images[i])
+            rgbEff_img.append(self.rgbEff_images[i])
+            depthEff_img.append(self.depthEff_images[i])
+            rgbSide_img.append(self.rgbSide_images[i])
+            depthSide_img.append(self.depthSide_images[i])
+
             state.append(self.states[i])
 
-        rgb_img = torch.stack(rgb_img)
-        depth_img = torch.stack(depth_img)
+        rgbTop_img = torch.stack(rgbTop_img)
+        depthTop_img = torch.stack(depthTop_img)
+        rgbEff_img = torch.stack(rgbEff_img)
+        depthEff_img = torch.stack(depthEff_img)
+        rgbSide_img = torch.stack(rgbSide_img)
+        depthSide_img = torch.stack(depthSide_img)
+
         state = torch.stack(state)
 
-        return rgb_img, depth_img, state
+        return rgbTop_img, depthTop_img, rgbEff_img, depthEff_img, rgbSide_img, depthSide_img, state
 
 class DataPreprocessor():
     def __init__(self, rgb_mean, rgb_std, depth_mean, depth_std, state_mean, state_std):
